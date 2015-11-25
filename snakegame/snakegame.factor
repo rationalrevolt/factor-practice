@@ -7,21 +7,23 @@ IN: snakegame
 
 SYMBOLS: :left :right :up :down ;
 
+SYMBOLS: :head :tail :body ;
+
 CONSTANT: snake-game-dim { 12 10 }
 
 TUPLE: snake-part
-    dir head? tail? ;
+    dir type ;
 
 : <snake-part-head> ( dir -- snake-part )
-    t f snake-part boa ;
+    :head snake-part boa ;
 
 TUPLE: snake-game
-    { snake initial: { T{ snake-part f :left t f }
-                       T{ snake-part f :left f f }
-                       T{ snake-part f :left f t } } }
+    { snake initial: { T{ snake-part f :left :head }
+                       T{ snake-part f :left :body }
+                       T{ snake-part f :left :tail } } }
     { snake-loc initial: { 5 4 } }
     { snake-dir initial: :right }
-    food-loc bonus-loc
+    { food-loc  initial: { 1 1 } } bonus-loc
     { score initial: 0 }
     paused? ;
 
@@ -33,16 +35,23 @@ TUPLE: snake-gadget < gadget
     snake-game new
     >>snake-game ;
 
+: draw-box ( loc color -- )
+    gl-color
+    [ 20 * ] map
+    [ 2  + ] map
+    { 16 16 } gl-fill-rect ;
+
+: draw-food ( loc -- )
+    [ COLOR: green draw-box ] when* ;
+
 : snake-part-color ( snake-part -- color )
-    {
-        { [ dup head?>> ] [ drop COLOR: red ] }
+    type>> {
+        { :head [ COLOR: red ] }
         [ drop COLOR: blue ]
-    } cond ;
+    } case ;
 
 : draw-snake-part ( loc snake-part -- )
-    snake-part-color gl-color
-    [ 20 * ] map
-    { 20 20 } gl-fill-rect ;
+    snake-part-color draw-box ;
 
 : ?roll-over-x ( x -- x )
     {
@@ -94,7 +103,7 @@ TUPLE: snake-gadget < gadget
 
 : grow-snake ( snake dir -- snake )
     opposite-dir <snake-part-head> prefix
-    dup second f >>head? drop ;
+    dup second :body >>type drop ;
 
 : update-snake-structure ( snake-game dir growing? -- )
     [
@@ -112,8 +121,12 @@ TUPLE: snake-gadget < gadget
     [ dup snake-loc>> ] dip
     next-loc >>snake-loc drop ;
 
+: will-eat-food? ( snake-game dir -- ? )
+    [ [ food-loc>> ] [ snake-loc>> ] bi ] dip
+    next-loc = ;
+
 : move-snake ( snake-game dir -- )
-    [ f update-snake-structure ]
+    2dup will-eat-food? [ update-snake-structure ] curry
     [ update-snake-loc ]
     [ >>snake-dir drop ]
     2tri ;
@@ -127,7 +140,9 @@ M: snake-gadget pref-dim*
 
 M: snake-gadget draw-gadget*
     snake-game>>
-    [ snake>> ] [ snake-loc>> ] bi draw-snake ;
+    dup [ snake>> ] [ snake-loc>> ] bi draw-snake
+    dup food-loc>> draw-food
+    drop ;
 
 M: snake-gadget graft*
     [ [ do-updates ] curry 200 milliseconds every ] keep timer<< ;
@@ -137,11 +152,14 @@ M: snake-gadget ungraft*
 
 : key-action ( key -- action )
     H{
-        { "RIGHT" :right }
-        { "LEFT"  :left }
-        { "UP"    :up }
-        { "DOWN"  :down }
+        { "RIGHT"  :right }
+        { "LEFT"   :left }
+        { "UP"     :up }
+        { "DOWN"   :down }
     } at ;
+
+: escape-key? ( gesture -- ? )
+    sym>> "ESC" = ;
 
 : handle-key ( snake-game key -- ? )
     key-action
@@ -154,7 +172,9 @@ M: snake-gadget ungraft*
 M: snake-gadget handle-gesture
     swap dup key-down?
     [
-        [ snake-game>> ] [ sym>> ] bi* handle-key
+        dup escape-key? not [
+            [ snake-game>> ] [ sym>> ] bi* handle-key
+        ] [ drop close-window f ] if
     ] [ 2drop t ] if ;
 
 : snake-game-window ( -- )
