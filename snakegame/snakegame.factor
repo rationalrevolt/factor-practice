@@ -1,7 +1,7 @@
 ! Copyright (C) 2015 Your name.
 ! See http://factorcode.org/license.txt for BSD license.
 USING: accessors arrays assocs calendar colors.constants combinators kernel
-math opengl prettyprint sequences timers ui ui.gadgets ui.gestures ui.render ;
+math opengl random sequences timers ui ui.gadgets ui.gestures ui.render ;
 
 IN: snakegame
 
@@ -25,7 +25,7 @@ TUPLE: snake-game
     { snake-dir initial: :right }
     { food-loc  initial: { 1 1 } } bonus-loc
     { score initial: 0 }
-    paused? ;
+    game-over? ;
 
 TUPLE: snake-gadget < gadget
     snake-game timer ;
@@ -37,12 +37,11 @@ TUPLE: snake-gadget < gadget
 
 : draw-box ( loc color -- )
     gl-color
-    [ 20 * ] map
-    [ 2  + ] map
+    [ 20 * 2 + ] map
     { 16 16 } gl-fill-rect ;
 
 : draw-food ( loc -- )
-    [ COLOR: green draw-box ] when* ;
+    COLOR: green draw-box ;
 
 : snake-part-color ( snake-part -- color )
     type>> {
@@ -53,19 +52,18 @@ TUPLE: snake-gadget < gadget
 : draw-snake-part ( loc snake-part -- )
     snake-part-color draw-box ;
 
-: ?roll-over-x ( x -- x )
+: ?roll-over ( x max -- x )
     {
-        { [ dup 0 < ] [ drop snake-game-dim first 1 - ] }
-        { [ dup snake-game-dim first = ] [ drop 0 ] }
-        [ ]
+        { [ 2dup >= ] [ 2drop 0 ] }
+        { [ over neg? ] [ nip 1 - ] }
+        [ drop ]
     } cond ;
 
+: ?roll-over-x ( x -- x )
+    snake-game-dim first ?roll-over ;
+
 : ?roll-over-y ( y -- y )
-    {
-        { [ dup 0 < ] [ drop snake-game-dim second 1 - ] }
-        { [ dup snake-game-dim second = ] [ drop 0 ] }
-        [ ]
-    } cond ;
+    snake-game-dim second ?roll-over ;
 
 : left ( loc -- loc )
     first2 [ 1 - ?roll-over-x ] dip 2array ;
@@ -79,7 +77,7 @@ TUPLE: snake-gadget < gadget
 : down ( loc -- loc )
     first2 1 + ?roll-over-y 2array ;
 
-: next-loc ( loc dir -- loc )
+: relative-loc ( loc dir -- loc )
     {
         { :left  [ left ] }
         { :right [ right ] }
@@ -89,8 +87,7 @@ TUPLE: snake-gadget < gadget
 
 : draw-snake ( snake loc -- )
     [
-        [ draw-snake-part ]
-        [ dir>> next-loc ] 2bi
+        [ draw-snake-part ] [ dir>> relative-loc ] 2bi
     ] reduce drop ;
 
 : opposite-dir ( dir -- dir )
@@ -105,43 +102,79 @@ TUPLE: snake-gadget < gadget
     opposite-dir <snake-part-head> prefix
     dup second :body >>type drop ;
 
-: update-snake-structure ( snake-game dir growing? -- )
-    [
-        [ dup snake>> ] dip
-        grow-snake >>snake
-        drop
-    ] [
-        opposite-dir 1array
-        [ snake>> ] dip over
-        [ dir>> ] map but-last
-        append [ >>dir drop ] 2each
-    ] if ;
+: snake-shape ( snake -- dirs )
+    [ dir>> ] map ;
+
+: move-snake ( snake dir -- snake )
+    dupd [ snake-shape but-last ] dip
+    opposite-dir prefix [ >>dir ] 2map ;
+
+: update-snake-shape ( snake-game dir growing? -- )
+    [ [ grow-snake ] curry change-snake ]
+    [ [ move-snake ] curry change-snake ]
+    if drop ;
 
 : update-snake-loc ( snake-game dir -- )
-    [ dup snake-loc>> ] dip
-    next-loc >>snake-loc drop ;
+    [ relative-loc ] curry change-snake-loc drop ;
 
-: will-eat-food? ( snake-game dir -- ? )
+: update-snake-dir ( snake-game dir -- )
+    >>snake-dir drop ;
+
+: snake-will-eat-itself? ( snake-game dir -- ? )
+    [ [ snake>> ] [ snake-loc>> ] bi ] dip relative-loc
+    [ [ dir>> relative-loc ] accumulate nip 1 tail ] keep
+    swap member? ;
+
+: snake-will-eat-food? ( snake-game dir -- ? )
     [ [ food-loc>> ] [ snake-loc>> ] bi ] dip
-    next-loc = ;
+    relative-loc = ;
 
-: move-snake ( snake-game dir -- )
-    2dup will-eat-food? [ update-snake-structure ] curry
+: random-point ( -- loc )
+    snake-game-dim first2
+    [ random ] bi@ 2array ;
+
+: generate-food ( snake-game -- )
+    random-point >>food-loc drop ;
+
+: eat-food ( snake-game -- )
+    [ 1 + ] change-score
+    [ drop f ] change-food-loc
+    drop ;
+
+: update-snake ( snake-game dir -- )
+    [
+        2dup snake-will-eat-food?
+        3dup [ drop eat-food ] [ 2drop ] if
+        3dup update-snake-shape
+        nip [ generate-food ] [ drop ] if
+    ]
     [ update-snake-loc ]
-    [ >>snake-dir drop ]
+    [ update-snake-dir ]
     2tri ;
 
+: game-over ( snake-game -- )
+    t >>game-over? drop ;
+
+: game-in-progress? ( snake-game -- ? )
+    game-over?>> not ;
+
 : do-updates ( gadget -- )
-    [ snake-game>> dup snake-dir>> move-snake ] keep
-    relayout-1 ;
+    [
+        snake-game>>
+        dup game-in-progress? [
+            dup snake-dir>>
+            2dup snake-will-eat-itself?
+            [ drop game-over ] [ update-snake ] if
+        ] [ drop ] if
+    ] keep relayout-1 ;
 
 M: snake-gadget pref-dim*
     drop snake-game-dim [ 20 * ] map ;
 
 M: snake-gadget draw-gadget*
     snake-game>>
-    dup [ snake>> ] [ snake-loc>> ] bi draw-snake
-    dup food-loc>> draw-food
+    [ [ snake>> ] [ snake-loc>> ] bi draw-snake ] keep
+    [ food-loc>> [ draw-food ] when* ] keep
     drop ;
 
 M: snake-gadget graft*
@@ -177,5 +210,5 @@ M: snake-gadget handle-gesture
         ] [ drop close-window f ] if
     ] [ 2drop t ] if ;
 
-: snake-game-window ( -- )
+: play-snake-game ( -- )
     [ <snake-gadget> "Snake Game" open-window ] with-ui ;
