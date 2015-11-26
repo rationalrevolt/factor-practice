@@ -1,39 +1,52 @@
 ! Copyright (C) 2015 Your name.
 ! See http://factorcode.org/license.txt for BSD license.
-USING: accessors arrays assocs calendar colors.constants combinators kernel
-math opengl random sequences timers ui ui.gadgets ui.gestures ui.render ;
+USING: accessors arrays assocs calendar colors.constants combinators hash-sets
+kernel make math opengl random sequences sets sorting timers ui ui.gadgets
+ui.gestures ui.render ;
 
-IN: snakegame
+IN: snake-game
 
 SYMBOLS: :left :right :up :down ;
 
-SYMBOLS: :head :tail :body ;
+SYMBOLS: :head :body :tail :dead ;
 
 CONSTANT: snake-game-dim { 12 10 }
+
+TUPLE: snake-game
+    snake snake-loc snake-dir food-loc
+    { score integer }
+    { paused? boolean }
+    { game-over? boolean } ;
 
 TUPLE: snake-part
     dir type ;
 
-: <snake-part-head> ( dir -- snake-part )
-    :head snake-part boa ;
+: <snake-part> ( dir type -- snake-part )
+    snake-part boa ;
 
-TUPLE: snake-game
-    { snake initial: { T{ snake-part f :left :head }
-                       T{ snake-part f :left :body }
-                       T{ snake-part f :left :tail } } }
-    { snake-loc initial: { 5 4 } }
-    { snake-dir initial: :right }
-    { food-loc  initial: { 1 1 } } bonus-loc
-    { score initial: 0 }
-    game-over? ;
+: <snake-game> ( -- snake-game )
+    snake-game new
+    [
+        :left :head <snake-part> ,
+        :left :body <snake-part> ,
+        :left :tail <snake-part> ,
+    ] V{ } make >>snake
+    { 5 4 } clone >>snake-loc
+    :right >>snake-dir
+    { 1 1 } clone >>food-loc
+    0 >>score
+    t >>paused?
+    f >>game-over? ;
 
 TUPLE: snake-gadget < gadget
     snake-game timer ;
 
+: start-new-game ( snake-gadget -- )
+    <snake-game> >>snake-game drop ;
+
 : <snake-gadget> ( -- snake-gadget )
     snake-gadget new
-    snake-game new
-    >>snake-game ;
+    [ start-new-game ] keep ;
 
 : draw-box ( loc color -- )
     gl-color
@@ -46,6 +59,7 @@ TUPLE: snake-gadget < gadget
 : snake-part-color ( snake-part -- color )
     type>> {
         { :head [ COLOR: red ] }
+        { :dead [ COLOR: black ] }
         [ drop COLOR: blue ]
     } case ;
 
@@ -86,9 +100,12 @@ TUPLE: snake-gadget < gadget
     } case ;
 
 : draw-snake ( snake loc -- )
+    2dup
     [
         [ draw-snake-part ] [ dir>> relative-loc ] 2bi
-    ] reduce drop ;
+    ] reduce drop
+    ! make sure to draw the head again
+    swap first draw-snake-part ;
 
 : opposite-dir ( dir -- dir )
     H{
@@ -99,7 +116,7 @@ TUPLE: snake-gadget < gadget
     } at ;
 
 : grow-snake ( snake dir -- snake )
-    opposite-dir <snake-part-head> prefix
+    opposite-dir :head <snake-part> prefix
     dup second :body >>type drop ;
 
 : snake-shape ( snake -- dirs )
@@ -120,21 +137,41 @@ TUPLE: snake-gadget < gadget
 : update-snake-dir ( snake-game dir -- )
     >>snake-dir drop ;
 
+: point>index ( loc -- n )
+    first2 [ ] [ snake-game-dim first * ] bi* + ;
+
+: index>point ( n -- loc )
+    snake-game-dim first /mod swap 2array ;
+
+: snake-occupied-locs ( snake head-loc -- points )
+    [ dir>> relative-loc ] accumulate nip ;
+
+: snake-occupied-indices ( snake head-loc -- points )
+    snake-occupied-locs [ point>index ] map natural-sort ;
+
+: all-indices ( -- points )
+    snake-game-dim first2 * iota ;
+
+: snake-unoccupied-indices ( snake head-loc -- points )
+    [ all-indices ] 2dip snake-occupied-indices >hash-set without ;
+
 : snake-will-eat-itself? ( snake-game dir -- ? )
     [ [ snake>> ] [ snake-loc>> ] bi ] dip relative-loc
-    [ [ dir>> relative-loc ] accumulate nip 1 tail ] keep
+    [ snake-occupied-locs rest ] keep
     swap member? ;
 
 : snake-will-eat-food? ( snake-game dir -- ? )
     [ [ food-loc>> ] [ snake-loc>> ] bi ] dip
     relative-loc = ;
 
-: random-point ( -- loc )
-    snake-game-dim first2
-    [ random ] bi@ 2array ;
+: random-sample ( seq -- e )
+    1 sample first ;
 
 : generate-food ( snake-game -- )
-    random-point >>food-loc drop ;
+    [
+        [ snake>> ] [ snake-loc>> ] bi
+        snake-unoccupied-indices random-sample index>point
+    ] keep food-loc<< ;
 
 : eat-food ( snake-game -- )
     [ 1 + ] change-score
@@ -153,10 +190,11 @@ TUPLE: snake-gadget < gadget
     2tri ;
 
 : game-over ( snake-game -- )
-    t >>game-over? drop ;
+    t >>game-over?
+    snake>> first :dead >>type drop ;
 
 : game-in-progress? ( snake-game -- ? )
-    game-over?>> not ;
+    [ game-over?>> ] [ paused?>> ] bi or not ;
 
 : do-updates ( gadget -- )
     [
@@ -194,7 +232,13 @@ M: snake-gadget ungraft*
 : escape-key? ( gesture -- ? )
     sym>> "ESC" = ;
 
-: handle-key ( snake-game key -- ? )
+: space-key? ( gesture -- ? )
+    sym>> " " = ;
+
+: new-game-key? ( gesture -- ? )
+    sym>> { "n" "N" } member? ;
+
+: ?handle-movement-key ( snake-game key -- ? )
     key-action
     [
         2dup [ snake-dir>> opposite-dir ] dip =
@@ -202,12 +246,18 @@ M: snake-gadget ungraft*
         f
     ] [ drop t ] if* ;
 
+: toggle-game-pause ( snake-gadget -- )
+    snake-game>> [ not ] change-paused? drop ;
+
 M: snake-gadget handle-gesture
     swap dup key-down?
     [
-        dup escape-key? not [
-            [ snake-game>> ] [ sym>> ] bi* handle-key
-        ] [ drop close-window f ] if
+        {
+            { [ dup escape-key? ] [ drop close-window f ] }
+            { [ dup space-key? ] [ drop toggle-game-pause f ] }
+            { [ dup new-game-key? ] [ drop start-new-game f ] }
+            [ [ snake-game>> ] [ sym>> ] bi* ?handle-movement-key ]
+        } cond
     ] [ 2drop t ] if ;
 
 : play-snake-game ( -- )
