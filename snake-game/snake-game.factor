@@ -1,8 +1,8 @@
 ! Copyright (C) 2015 Your name.
 ! See http://factorcode.org/license.txt for BSD license.
-USING: accessors arrays assocs calendar colors.constants combinators hash-sets
-kernel make math opengl random sequences sets sorting timers ui ui.gadgets
-ui.gestures ui.render ;
+USING: accessors arrays assocs calendar colors.constants combinators 
+formatting hash-sets kernel make math opengl random sequences sets sorting
+timers ui ui.gadgets ui.gadgets.status-bar ui.gadgets.worlds ui.gestures ui.render ;
 
 IN: snake-game
 
@@ -194,16 +194,35 @@ TUPLE: snake-gadget < gadget
 : game-in-progress? ( snake-game -- ? )
     [ game-over?>> ] [ paused?>> ] bi or not ;
 
-: do-updates ( gadget -- )
-    [
-        snake-game>>
-        dup game-in-progress? [
-            dup snake-dir>>
-            2dup snake-will-eat-itself?
-            [ drop game-over ] [ update-snake ] if
-        ] [ drop ] if
-    ] keep relayout-1 ;
+: do-game-step ( gadget -- )
+    snake-game>>
+    dup game-in-progress? [
+        dup snake-dir>>
+        2dup snake-will-eat-itself?
+        [ drop game-over ] [ update-snake ] if
+    ] [ drop ] if ;
 
+: generate-status-message ( snake-game -- str )
+    {
+        [ score>> "Score: %d" sprintf ]
+        [
+            {
+                { [ dup game-over?>> ] [ drop "Game Over" ] }
+                { [ dup paused?>> ] [ drop "Paused" ] }
+                [ drop "In Progress" ]
+            } cond
+        ]
+    } cleave 2array " -- " join ;
+        
+: update-status ( gadget -- )
+    [ snake-game>> generate-status-message ] keep show-status ;
+
+: do-updates ( gadget -- )
+    [ do-game-step ]
+    [ update-status ]
+    [ relayout-1 ]
+    tri ;
+        
 M: snake-gadget pref-dim*
     drop snake-game-dim [ 20 * ] map ;
 
@@ -259,4 +278,4 @@ M: snake-gadget handle-gesture
     ] [ 2drop t ] if ;
 
 : play-snake-game ( -- )
-    [ <snake-gadget> "Snake Game" open-window ] with-ui ;
+    [ <snake-gadget> "Snake Game" open-status-window ] with-ui ;
