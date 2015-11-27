@@ -173,21 +173,28 @@ TUPLE: snake-gadget < gadget
         snake-unoccupied-indices random-sample index>point
     ] keep food-loc<< ;
 
-: eat-food ( snake-game -- )
+: update-score ( snake-game -- )
     [ 1 + ] change-score
-    [ drop f ] change-food-loc
     drop ;
 
 : update-snake ( snake-game dir -- )
-    [
-        2dup snake-will-eat-food?
-        3dup [ drop eat-food ] [ 2drop ] if
-        3dup update-snake-shape
-        nip [ generate-food ] [ drop ] if
-    ]
-    [ update-snake-loc ]
-    [ update-snake-dir ]
-    2tri ;
+    2dup snake-will-eat-food?
+    {
+        [ [ drop update-score ] [ 2drop ] if ]
+        [ update-snake-shape ]
+        [ drop update-snake-loc ]
+        [ drop update-snake-dir ]
+        [ nip [ generate-food ] [ drop ] if ]
+    } 3cleave ;
+    ! [
+    !     2dup snake-will-eat-food?
+    !     3dup [ drop eat-food ] [ 2drop ] if
+    !     3dup update-snake-shape
+    !     nip [ generate-food ] [ drop ] if
+    ! ]
+    ! [ update-snake-loc ]
+    ! [ update-snake-dir ]
+    ! 2tri ;
 
 : game-over ( snake-game -- )
     t >>game-over?
@@ -229,14 +236,14 @@ M: snake-gadget ungraft*
         { "DOWN"   :down }
     } at ;
 
-: escape-key? ( gesture -- ? )
-    sym>> "ESC" = ;
+: quit-key? ( gesture -- ? )
+    sym>> HS{ "ESC" "q" "Q" } in? ;
 
-: space-key? ( gesture -- ? )
-    sym>> " " = ;
+: pause-key? ( gesture -- ? )
+    sym>> HS{ " " "SPACE" } in? ;
 
 : new-game-key? ( gesture -- ? )
-    sym>> { "n" "N" } member? ;
+    sym>> HS{ "ENTER" "RET" "n" "N" } in? ;
 
 : ?handle-movement-key ( snake-game key -- ? )
     key-action
@@ -253,8 +260,8 @@ M: snake-gadget handle-gesture
     swap dup key-down?
     [
         {
-            { [ dup escape-key? ] [ drop close-window f ] }
-            { [ dup space-key? ] [ drop toggle-game-pause f ] }
+            { [ dup quit-key? ] [ drop close-window f ] }
+            { [ dup pause-key? ] [ drop toggle-game-pause f ] }
             { [ dup new-game-key? ] [ drop start-new-game f ] }
             [ [ snake-game>> ] [ sym>> ] bi* ?handle-movement-key ]
         } cond
