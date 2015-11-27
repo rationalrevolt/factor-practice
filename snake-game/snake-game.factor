@@ -79,24 +79,24 @@ TUPLE: snake-gadget < gadget
 : ?roll-over-y ( y -- y )
     snake-game-dim second ?roll-over ;
 
-: left ( loc -- loc )
+: move-left ( loc -- loc )
     first2 [ 1 - ?roll-over-x ] dip 2array ;
 
-: right ( loc -- loc )
+: move-right ( loc -- loc )
     first2 [ 1 + ?roll-over-x ] dip 2array ;
 
-: up ( loc -- loc )
+: move-up ( loc -- loc )
     first2 1 - ?roll-over-y 2array ;
 
-: down ( loc -- loc )
+: move-down ( loc -- loc )
     first2 1 + ?roll-over-y 2array ;
 
 : relative-loc ( loc dir -- loc )
     {
-        { :left  [ left ] }
-        { :right [ right ] }
-        { :up    [ up ] }
-        { :down  [ down ] }
+        { :left  [ move-left ] }
+        { :right [ move-right ] }
+        { :up    [ move-up ] }
+        { :down  [ move-down ] }
     } case ;
 
 : draw-snake ( snake loc -- )
@@ -186,15 +186,6 @@ TUPLE: snake-gadget < gadget
         [ drop update-snake-dir ]
         [ nip [ generate-food ] [ drop ] if ]
     } 3cleave ;
-    ! [
-    !     2dup snake-will-eat-food?
-    !     3dup [ drop eat-food ] [ 2drop ] if
-    !     3dup update-snake-shape
-    !     nip [ generate-food ] [ drop ] if
-    ! ]
-    ! [ update-snake-loc ]
-    ! [ update-snake-dir ]
-    ! 2tri ;
 
 : game-over ( snake-game -- )
     t >>game-over?
@@ -240,7 +231,7 @@ M: snake-gadget ungraft*
     sym>> HS{ "ESC" "q" "Q" } in? ;
 
 : pause-key? ( gesture -- ? )
-    sym>> HS{ " " "SPACE" } in? ;
+    sym>> HS{ " " "SPACE" "p" "P" } in? ;
 
 : new-game-key? ( gesture -- ? )
     sym>> HS{ "ENTER" "RET" "n" "N" } in? ;
