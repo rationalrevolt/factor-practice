@@ -14,9 +14,10 @@ CONSTANT: snake-game-dim { 12 10 }
 
 TUPLE: snake-game
     snake snake-loc snake-dir food-loc
-    { score integer }
-    { paused? boolean }
-    { game-over? boolean } ;
+    { next-turn-dir initial: f }
+    { score integer initial: 0 }
+    { paused? boolean initial: t }
+    { game-over? boolean initial: f } ;
 
 TUPLE: snake-part
     dir type ;
@@ -24,19 +25,19 @@ TUPLE: snake-part
 : <snake-part> ( dir type -- snake-part )
     snake-part boa ;
 
-: <snake-game> ( -- snake-game )
-    snake-game new
+: <snake> ( -- snake )
     [
         :left :head <snake-part> ,
         :left :body <snake-part> ,
         :left :tail <snake-part> ,
-    ] V{ } make >>snake
+    ] V{ } make ;
+
+: <snake-game> ( -- snake-game )
+    snake-game new
+    <snake> >>snake
     { 5 4 } clone >>snake-loc
     :right >>snake-dir
-    { 1 1 } clone >>food-loc
-    0 >>score
-    t >>paused?
-    f >>game-over? ;
+    { 1 1 } clone >>food-loc ;
 
 TUPLE: snake-gadget < gadget
     snake-game timer ;
@@ -194,31 +195,36 @@ TUPLE: snake-gadget < gadget
 : game-in-progress? ( snake-game -- ? )
     [ game-over?>> ] [ paused?>> ] bi or not ;
 
+: ?handle-pending-turn ( snake-game -- )
+    dup next-turn-dir>> [
+        >>snake-dir
+        f >>next-turn-dir
+    ] when* drop ;
+
 : do-game-step ( gadget -- )
-    snake-game>>
     dup game-in-progress? [
+        dup ?handle-pending-turn
         dup snake-dir>>
         2dup snake-will-eat-itself?
         [ drop game-over ] [ update-snake ] if
     ] [ drop ] if ;
 
 : generate-status-message ( snake-game -- str )
-    {
-        [ score>> "Score: %d" sprintf ]
-        [
-            {
-                { [ dup game-over?>> ] [ drop "Game Over" ] }
-                { [ dup paused?>> ] [ drop "Paused" ] }
-                [ drop "In Progress" ]
-            } cond
-        ]
-    } cleave 2array " -- " join ;
+    [ score>> "Score: %d" sprintf ]
+    [
+        {
+            { [ dup game-over?>> ] [ drop "Game Over" ] }
+            { [ dup paused?>> ] [ drop "Game Paused" ] }
+            [ drop "Game In Progress" ]
+        } cond
+    ]
+    bi 2array " -- " join ;
         
 : update-status ( gadget -- )
     [ snake-game>> generate-status-message ] keep show-status ;
 
 : do-updates ( gadget -- )
-    [ do-game-step ]
+    [ snake-game>> do-game-step ]
     [ update-status ]
     [ relayout-1 ]
     tri ;
@@ -246,36 +252,45 @@ M: snake-gadget ungraft*
         { "DOWN"   :down }
     } at ;
 
-: quit-key? ( gesture -- ? )
-    sym>> HS{ "ESC" "q" "Q" } in? ;
+: quit-key? ( key -- ? )
+    HS{ "ESC" "q" "Q" } in? ;
 
-: pause-key? ( gesture -- ? )
-    sym>> HS{ " " "SPACE" "p" "P" } in? ;
+: pause-key? ( key -- ? )
+    HS{ " " "SPACE" "p" "P" } in? ;
 
-: new-game-key? ( gesture -- ? )
-    sym>> HS{ "ENTER" "RET" "n" "N" } in? ;
+: new-game-key? ( key -- ? )
+    HS{ "ENTER" "RET" "n" "N" } in? ;
 
-: ?handle-movement-key ( snake-game key -- ? )
+: ?handle-movement-key ( snake-game key -- )
     key-action
     [
         2dup [ snake-dir>> opposite-dir ] dip =
-        [ 2drop ] [ >>snake-dir drop ] if
-        f
-    ] [ drop t ] if* ;
+        [ 2drop ] [ >>next-turn-dir drop ] if
+    ] [ drop ] if* ;
 
 : toggle-game-pause ( snake-gadget -- )
     snake-game>> [ not ] change-paused? drop ;
 
+: handle-key ( snake-gadget key -- )
+    {
+        { [ dup quit-key? ] [ drop close-window ] }
+        { [ dup pause-key? ] [ drop toggle-game-pause ] }
+        { [ dup new-game-key? ] [ drop start-new-game ] }
+        [
+            [ snake-game>> ] dip over
+            game-in-progress? [ ?handle-movement-key ] [ 2drop ] if
+        ]
+    } cond ;
+
 M: snake-gadget handle-gesture
     swap dup key-down?
+    [ sym>> handle-key ] [ 2drop ] if f ;
+
+: <snake-world-attributes> ( -- world-attributes )
+    <world-attributes> "Snake Game" >>title    
     [
-        {
-            { [ dup quit-key? ] [ drop close-window f ] }
-            { [ dup pause-key? ] [ drop toggle-game-pause f ] }
-            { [ dup new-game-key? ] [ drop start-new-game f ] }
-            [ [ snake-game>> ] [ sym>> ] bi* ?handle-movement-key ]
-        } cond
-    ] [ 2drop t ] if ;
+        { maximize-button resize-handles } without
+    ] change-window-controls ;
 
 : play-snake-game ( -- )
-    [ <snake-gadget> "Snake Game" open-status-window ] with-ui ;
+    [ <snake-gadget> <snake-world-attributes> open-status-window ] with-ui ;
