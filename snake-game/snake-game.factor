@@ -1,14 +1,18 @@
 ! Copyright (C) 2015 Your name.
 ! See http://factorcode.org/license.txt for BSD license.
-USING: accessors arrays assocs calendar colors.constants combinators 
-formatting hash-sets kernel make math opengl random sequences sets sorting
-timers ui ui.gadgets ui.gadgets.status-bar ui.gadgets.worlds ui.gestures ui.render ;
+USING: accessors arrays assocs calendar combinators destructors
+formatting hash-sets images.loader images.sprites kernel locals make math
+namespaces opengl opengl.textures random sequences sets sorting timers
+ui ui.gadgets ui.gadgets.status-bar ui.gadgets.worlds ui.gestures ui.render
+vocabs.loader ;
 
 IN: snake-game
 
 SYMBOLS: :left :right :up :down ;
 
-SYMBOLS: :head :body :tail :dead ;
+SYMBOLS: :head :body :tail ;
+
+SYMBOL: game-textures
 
 CONSTANT: snake-game-dim { 12 10 }
 
@@ -40,7 +44,7 @@ TUPLE: snake-part
     { 1 1 } clone >>food-loc ;
 
 TUPLE: snake-gadget < gadget
-    snake-game timer ;
+    snake-game timer textures ;
 
 : start-new-game ( snake-gadget -- )
     <snake-game> >>snake-game drop ;
@@ -49,23 +53,61 @@ TUPLE: snake-gadget < gadget
     snake-gadget new
     [ start-new-game ] keep ;
 
-: draw-box ( loc color -- )
-    gl-color
-    [ 20 * 2 + ] map
-    { 16 16 } gl-fill-rect ;
+: opposite-dir ( dir -- dir )
+    H{
+        { :left  :right }
+        { :right :left }
+        { :up    :down }
+        { :down  :up }
+    } at ;
+
+: lookup-texture ( key -- texture )
+    game-textures get at ;
+
+: screen-loc ( loc -- loc )
+    [ 20 * ] map ;
+
+: draw-sprite* ( key screen-loc -- )
+    [ lookup-texture draw-texture ] with-translation ;
+
+: draw-sprite ( grid-loc key -- )
+    swap screen-loc draw-sprite* ;
 
 : draw-food ( loc -- )
-    COLOR: green draw-box ;
+    "food" draw-sprite ;
 
-: snake-part-color ( snake-part -- color )
-    type>> {
-        { :head [ COLOR: red ] }
-        { :dead [ COLOR: black ] }
-        [ drop COLOR: blue ]
+: draw-background ( -- )
+    { 0 0 } "background" draw-sprite ;
+
+: offset ( loc dim -- loc )
+    [ + ] 2map ;
+
+: draw-snake-head ( loc facing-dir -- )
+    dup name>> rest "head-" prepend
+    [
+        [ screen-loc ] dip
+        {
+            { :right [ { -20 -10 } ] }
+            { :down  [ { -10 -20 } ] }
+            { :up    [ { -10  0  } ] }
+            { :left  [ {  0  -10 } ] }
+        } case offset
+    ] dip
+    swap draw-sprite* ;
+
+: draw-snake-body ( loc from-dir to-dir -- )
+    2array [ name>> rest ] map "body" prefix "-" join
+    draw-sprite ;
+
+: draw-snake-tail ( loc facing-dir -- )
+    name>> rest "tail-" prepend draw-sprite ;
+
+: draw-snake-part ( loc from-dir snake-part -- )
+    dup type>> {
+        { :head [ drop opposite-dir draw-snake-head ] }
+        { :tail [ drop draw-snake-tail ] }
+        { :body [ dir>> draw-snake-body ] }
     } case ;
-
-: draw-snake-part ( loc snake-part -- )
-    snake-part-color draw-box ;
 
 : ?roll-over ( x max -- x )
     {
@@ -80,41 +122,29 @@ TUPLE: snake-gadget < gadget
 : ?roll-over-y ( y -- y )
     snake-game-dim second ?roll-over ;
 
-: move-left ( loc -- loc )
-    first2 [ 1 - ?roll-over-x ] dip 2array ;
-
-: move-right ( loc -- loc )
-    first2 [ 1 + ?roll-over-x ] dip 2array ;
-
-: move-up ( loc -- loc )
-    first2 1 - ?roll-over-y 2array ;
-
-: move-down ( loc -- loc )
-    first2 1 + ?roll-over-y 2array ;
+: move ( loc dim -- loc )
+    offset first2
+    [ ?roll-over-x ] [ ?roll-over-y ] bi* 2array ;
 
 : relative-loc ( loc dir -- loc )
     {
-        { :left  [ move-left ] }
-        { :right [ move-right ] }
-        { :up    [ move-up ] }
-        { :down  [ move-down ] }
+        { :left  [ { -1  0 } move ] }
+        { :right [ {  1  0 } move ] }
+        { :up    [ {  0 -1 } move ] }
+        { :down  [ {  0  1 } move ] }
     } case ;
 
-: draw-snake ( snake loc -- )
-    2dup
+: draw-snake-reduce-step ( loc from-dir snake-part -- {new-loc,new-from-dir} )
+    nip dir>> [ relative-loc ] keep 2array ;
+
+: draw-snake ( snake loc from-dir -- )
+    2array 2dup
     [
-        [ draw-snake-part ] [ dir>> relative-loc ] 2bi
+        [ first2 ] dip
+        [ draw-snake-part ] [ draw-snake-reduce-step ] 3bi
     ] reduce drop
     ! make sure to draw the head again
-    swap first draw-snake-part ;
-
-: opposite-dir ( dir -- dir )
-    H{
-        { :left  :right }
-        { :right :left }
-        { :up    :down }
-        { :down  :up }
-    } at ;
+    swap first [ first2 ] dip draw-snake-part ;
 
 : grow-snake ( snake dir -- snake )
     opposite-dir :head <snake-part> prefix
@@ -189,8 +219,7 @@ TUPLE: snake-gadget < gadget
     } 3cleave ;
 
 : game-over ( snake-game -- )
-    t >>game-over?
-    snake>> first :dead >>type drop ;
+    t >>game-over? drop ;
 
 : game-in-progress? ( snake-game -- ? )
     [ game-over?>> ] [ paused?>> ] bi or not ;
@@ -232,17 +261,82 @@ TUPLE: snake-gadget < gadget
 M: snake-gadget pref-dim*
     drop snake-game-dim [ 20 * ] map ;
 
+: load-sprite-image ( filename -- image )
+    [ snake-game vocabulary>> vocab-dir ] dip
+    "vocab:%s/%s" sprintf load-image ;
+
+: make-texture ( image -- texture )
+    { 0 0 } <texture> ;
+
+: make-sprites ( filename cols rows -- seq )
+    [ load-sprite-image ] 2dip generate-sprite-sheet
+    [ make-texture ] map ;
+
+: snake-head-textures ( -- assoc )
+    "head.png" 1 4 make-sprites
+    { "head-up" "head-right" "head-down" "head-left" }
+    [ swap 2array ] 2map ;
+
+:: assoc-with-value-like ( assoc key seq -- )
+    key assoc at :> value
+    seq [ [ value ] dip assoc set-at ] each ;
+
+: snake-body-textures ( -- assoc )
+    "body.png" 3 2 make-sprites
+    { 1 2 3 4 5 6 }
+    [ swap 2array ] 2map
+    dup 1 { "body-right-up" "body-down-left" } assoc-with-value-like
+    dup 2 { "body-down-right" "body-left-up" } assoc-with-value-like
+    dup 3 { "body-right-right" "body-left-left" } assoc-with-value-like
+    dup 4 { "body-up-up" "body-down-down" } assoc-with-value-like    
+    dup 5 { "body-up-right" "body-left-down" } assoc-with-value-like
+    dup 6 { "body-right-down" "body-up-left" } assoc-with-value-like
+    dup [ { 1 2 3 4 5 6 } ] dip [ delete-at ] curry each ;
+
+: snake-tail-textures ( -- assoc )
+    "tail.png" 2 2 make-sprites
+    { "tail-down" "tail-left" "tail-up" "tail-right" }
+    [ swap 2array ] 2map ;
+
+: food-texture ( -- assoc )
+    "food" "food.png" load-sprite-image make-texture
+    2array 1array ;
+
+: background-texture ( -- assoc )
+    "background" "background.png" load-sprite-image make-texture
+    2array 1array ;
+
+: load-game-textures ( snake-gadget -- textures )
+    dup textures>> [ ] [
+        [
+            snake-head-textures %%
+            snake-body-textures %%
+            snake-tail-textures %%
+            food-texture %%
+            background-texture %%
+        ] H{ } make >>textures
+        textures>>
+    ] ?if ;
+
 M: snake-gadget draw-gadget*
-    snake-game>>
-    [ [ snake>> ] [ snake-loc>> ] bi draw-snake ] keep
-    [ food-loc>> [ draw-food ] when* ] keep
-    drop ;
+    [ load-game-textures game-textures ] keep [
+        draw-background snake-game>>
+        [ food-loc>> [ draw-food ] when* ]
+        [
+            [ snake>> ]
+            [ snake-loc>> ]
+            [ snake-dir>> opposite-dir ]
+            tri draw-snake
+        ] bi
+    ] curry with-variable ;
 
 M: snake-gadget graft*
     [ [ do-updates ] curry 200 milliseconds every ] keep timer<< ;
 
 M: snake-gadget ungraft*
-    [ stop-timer f ] change-timer drop ;
+    [ stop-timer f ] change-timer
+    dup textures>> values [ dispose ] each
+    f >>textures drop ;
 
 : key-action ( key -- action )
     H{
@@ -294,3 +388,5 @@ M: snake-gadget handle-gesture
 
 : play-snake-game ( -- )
     [ <snake-gadget> <snake-world-attributes> open-status-window ] with-ui ;
+
+MAIN: play-snake-game

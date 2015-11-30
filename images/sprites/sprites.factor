@@ -18,7 +18,7 @@ IN: images.sprites
         append! drop
     ] each new-image ;
 
-:: generate-sprite-sheet ( image cols rows -- seq )
+:: generate-sprite-sheet ( image rows cols -- seq )
     cols rows 2array :> split-dims
     image dim>> split-dims [ / ] 2map first2 :> ( sw sh )
     rows iota [ sh * ] map :> ys

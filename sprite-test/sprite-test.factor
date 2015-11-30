@@ -24,7 +24,7 @@ M: i-gadget ungraft*
     f >>textures drop ;
 
 : make-sprites ( image -- seq )
-    2 3 sprite-sheet
+    3 2 sprite-sheet
     [ { 0 0 } <texture> ] map ;
 
 : load-textures ( gadget -- seq )
