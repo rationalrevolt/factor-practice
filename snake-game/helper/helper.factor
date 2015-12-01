@@ -1,9 +1,9 @@
-! Copyright (C) 2015 Your name.
+! Copyright (C) 2015 Sankaranarayanan Viswanathan
 ! See http://factorcode.org/license.txt for BSD license.
 USING: accessors arrays byte-vectors fry images kernel locals
 math sequences ;
 
-IN: images.sprites
+IN: snake-game.helper
 
 : new-image-like ( image w h -- image )
     [ clone ] 2dip

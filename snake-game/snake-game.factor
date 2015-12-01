@@ -1,10 +1,10 @@
-! Copyright (C) 2015 Your name.
+! Copyright (C) 2015 Sankaranarayanan Viswanathan
 ! See http://factorcode.org/license.txt for BSD license.
 USING: accessors arrays assocs calendar combinators destructors
-formatting hash-sets images.loader images.sprites kernel locals make math
-namespaces opengl opengl.textures random sequences sets sorting timers
-ui ui.gadgets ui.gadgets.status-bar ui.gadgets.worlds ui.gestures ui.render
-vocabs.loader ;
+formatting hash-sets images.loader kernel locals make math
+namespaces opengl opengl.textures random sequences sets sorting
+snake-game.helper timers ui ui.gadgets ui.gadgets.status-bar
+ui.gadgets.worlds ui.gestures ui.render vocabs.loader ;
 
 IN: snake-game
 
@@ -259,7 +259,7 @@ TUPLE: snake-gadget < gadget
     tri ;
         
 M: snake-gadget pref-dim*
-    drop snake-game-dim [ 20 * ] map ;
+    drop snake-game-dim [ 20 * 20 + ] map ;
 
 : load-sprite-image ( filename -- image )
     [ snake-game vocabulary>> vocab-dir ] dip
@@ -320,14 +320,17 @@ M: snake-gadget pref-dim*
 
 M: snake-gadget draw-gadget*
     [ load-game-textures game-textures ] keep [
-        draw-background snake-game>>
-        [ food-loc>> [ draw-food ] when* ]
-        [
-            [ snake>> ]
-            [ snake-loc>> ]
-            [ snake-dir>> opposite-dir ]
-            tri draw-snake
-        ] bi
+        draw-background
+        { 10 10 } [
+            snake-game>>
+            [ food-loc>> [ draw-food ] when* ]
+            [
+                [ snake>> ]
+                [ snake-loc>> ]
+                [ snake-dir>> opposite-dir ]
+                tri draw-snake
+            ] bi
+        ] with-translation
     ] curry with-variable ;
 
 M: snake-gadget graft*
